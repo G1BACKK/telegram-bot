@@ -1,85 +1,89 @@
-# bot.py
-
 import sqlite3
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from telegram.ext import Application, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 
-TOKEN = "YOUR_BOT_TOKEN"  # Replace with your bot token
-GROUP_ID = -10012345678  # Replace with your group ID
-VIP_LINK = "https://t.me/yourvipgroup"  # Replace with your VIP group invite link
+# Config
+TOKEN = "7994212847:AAGCalv9rgaK3fziyPs0p0vwNpqeY4rIHAQ"
+GROUP_ID = -1002316637165
+PINNED_MSG_ID = 87
+VIP_LINK = "https://t.me/+q1Wg9YeCAKFlOGRl"
 
-# SQLite database setup
-conn = sqlite3.connect("user_shares.db", check_same_thread=False)
+# DB Setup
+conn = sqlite3.connect("forwards.db", check_same_thread=False)
 cursor = conn.cursor()
-cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, shares INTEGER)")
+cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, forwards INTEGER DEFAULT 0)")
+cursor.execute("CREATE TABLE IF NOT EXISTS forward_receivers (user_id INTEGER, receiver_id INTEGER, UNIQUE(user_id, receiver_id))")
 conn.commit()
 
+# Welcome and Instructions
 async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for member in update.message.new_chat_members:
         user_id = member.id
-        cursor.execute("INSERT OR IGNORE INTO users (user_id, shares) VALUES (?, 0)", (user_id,))
+        cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
         conn.commit()
 
         keyboard = [
-            [InlineKeyboardButton("🔗 SHARE GROUP (10 REQUIRED)", callback_data="share")],
-            [InlineKeyboardButton("🚀 JOIN VIP (LOCKED)", callback_data="vip")]
+            [InlineKeyboardButton("🔁 FORWARD GROUP PINNED MESSAGE", url=f"https://t.me/c/2316637165/{PINNED_MSG_ID}")],
+            [InlineKeyboardButton("✅ DONE SHARING", callback_data="check")],
+            [InlineKeyboardButton("🚀 VIP ACCESS (LOCKED)", callback_data="vip")]
         ]
-        await update.message.reply_text(
-            f"👋 Welcome [{member.first_name}](tg://user?id={user_id})!\n\n"
-            "⚠️ *VIP ACCESS LOCKED*\n\n"
-            "📢 Share this group with 10 friends to unlock VIP:\n"
-            "👉 https://t.me/yourgroup\n\n"
-            "👇 Click SHARE GROUP to begin!",
+
+        await update.effective_chat.send_message(
+            text=(
+                f"👋 Welcome [{member.first_name}](tg://user?id={user_id})!\n\n"
+                "📌 *Forward the pinned message to 3 friends to unlock VIP access!*\n"
+                "1. Tap the forward button\n"
+                "2. Send to 3 different users\n"
+                "3. Tap ✅ DONE SHARING",
+            ),
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
-async def track_shares(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    if update.message.forward_from_chat and update.message.forward_from_chat.id == GROUP_ID:
-        cursor.execute("INSERT OR IGNORE INTO users (user_id, shares) VALUES (?, 0)", (user_id,))
-        cursor.execute("UPDATE users SET shares = shares + 1 WHERE user_id = ?", (user_id,))
-        conn.commit()
+# Forward Tracker
+async def track_forward(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg: Message = update.message
+    user_id = msg.forward_sender_name or msg.forward_from_chat or msg.forward_from
+    sender_id = msg.from_user.id
 
+    if msg.forward_from_chat and msg.forward_from_chat.id == GROUP_ID and msg.forward_from_message_id == PINNED_MSG_ID:
+        receiver_id = msg.chat.id
+        cursor.execute("SELECT 1 FROM forward_receivers WHERE user_id = ? AND receiver_id = ?", (sender_id, receiver_id))
+        if cursor.fetchone() is None:
+            cursor.execute("INSERT INTO forward_receivers (user_id, receiver_id) VALUES (?, ?)", (sender_id, receiver_id))
+            cursor.execute("UPDATE users SET forwards = forwards + 1 WHERE user_id = ?", (sender_id,))
+            conn.commit()
+
+# Button Handler
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    await query.answer()
     user_id = query.from_user.id
 
-    cursor.execute("SELECT shares FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT forwards FROM users WHERE user_id = ?", (user_id,))
     result = cursor.fetchone()
-    shares = result[0] if result else 0
+    count = result[0] if result else 0
 
-    if query.data == "share":
-        await query.answer()
-        await query.edit_message_text(
-            "📤 *SHARE THIS LINK 10 TIMES:*\n\n"
-            "👉 https://t.me/yourgroup\n\n"
-            "After sharing, click ✅ DONE SHARING below.",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ DONE SHARING", callback_data="check")]
-            ])
-        )
-    elif query.data == "check":
-        if shares >= 10:
-            await query.answer("🎉 VIP UNLOCKED!", show_alert=True)
+    if query.data == "check":
+        if count >= 3:
             await query.edit_message_text(
-                f"✅ *ACCESS GRANTED!*\n\n"
-                f"🚀 Join VIP Group: [Click Here]({VIP_LINK})",
+                text=f"✅ ACCESS GRANTED!\n\n🎉 [Join VIP Channel Here]({VIP_LINK})",
                 parse_mode="Markdown",
                 disable_web_page_preview=True
             )
         else:
-            await query.answer(f"❌ Need {10 - shares} more shares!", show_alert=True)
+            await query.answer(f"❌ You need {3 - count} more forwards!", show_alert=True)
     elif query.data == "vip":
-        await query.answer("🔒 Complete sharing first!", show_alert=True)
+        await query.answer("🔒 You must forward to 3 users first!", show_alert=True)
 
+# Main Bot
 def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, track_shares))
     app.add_handler(CallbackQueryHandler(button_click))
+    app.add_handler(MessageHandler(filters.FORWARDED & filters.TEXT & (~filters.COMMAND), track_forward))
     app.run_polling()
 
 if __name__ == "__main__":
     main()
+
