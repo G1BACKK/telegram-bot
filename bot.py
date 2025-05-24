@@ -3,7 +3,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from telegram.ext import Application, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 
 # Config
-TOKEN = "7994212847:AAGCalv9rgaK3fziyPs0p0vwNpqeY4rIHAQ"
+TOKEN = "7602201949:AAG8E2YSvOUrw0J5RRTG0cXlyxjvW5hEKZY"
 GROUP_ID = -1002316637165
 PINNED_MSG_ID = 87
 VIP_LINK = "https://t.me/+q1Wg9YeCAKFlOGRl"
